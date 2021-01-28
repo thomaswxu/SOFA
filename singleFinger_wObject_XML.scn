@@ -1,0 +1,120 @@
+<!-- 
+    This scene is an XML translation of singleFinger_wObject - v2.pyscn, to allow cleaner implementation of multithreading.
+    See "singleFinger_wObject - v2.pyscn for scene equivalent using python.
+
+    Note: mesh filepaths are currently absolute, not relative.
+-->
+
+<?xml version="1.0"?>
+<Node name="root" gravity="0 0 0" dt="0.02">    
+    
+    <RequiredPlugin pluginName="SofaPython" />
+    <RequiredPlugin pluginName="SoftRobots" />
+    <RequiredPlugin pluginName="SofaSparseSolver" />
+    <RequiredPlugin pluginName="SofaConstraint" />
+    <RequiredPlugin pluginName="SofaImplicitOdeSolver" />
+    <RequiredPlugin pluginName="SofaLoader" />
+    <RequiredPlugin pluginName="SofaDeformable" />
+    <RequiredPlugin pluginName="SofaEngine" />
+    <RequiredPlugin pluginName="SofaMeshCollision" />
+    <RequiredPlugin pluginName="SofaSimpleFem" />
+    <RequiredPlugin pluginName="SofaValidation" />
+    <RequiredPlugin pluginName="SofaCUDA" />
+    <RequiredPlugin pluginName="MultiThreading" />
+    <!-- these plugins tecnhically required but already loaded in:
+    <RequiredPlugin pluginName="STLib" />
+    -->
+
+    <PythonScriptController filename='pythonControllers/singleFingerController_XML.py' classname='controller' />
+
+    <!-- <AnimationLoopParallelScheduler name="mainLoop" threadNumber="6" /> -->
+        
+    <OglSceneFrame style="Arrows" alignment="TopRight"/>
+    <VisualStyle displayFlags="hideVisualModels showBehavior showMapping" />
+
+    <FreeMotionAnimationLoop solveVelocityConstraintFirst="0"/>
+    <!-- <MultiStepAnimationLoop /> finger didn't bend -->
+
+    <GenericConstraintSolver maxIt="1000" tolerance="1e-6" computeConstraintForces="1" /> <!-- alt: 1000, 1e-6 -->
+    <!-- <LCPConstraintSolver maxIt="1000" tolerance="1e-6" build_lcp="true" mu="0.3" printLog="0" /> (may cause bend issues) -->
+
+    <DefaultPipeline verbose="0" draw="0" /> <!-- depth="5" -->
+    <BruteForceDetection name="N2" />
+    <MinProximityIntersection alarmDistance="1.5" contactDistance="0.75" />
+    <DefaultContactManager name="Response" response="FrictionContact" responseParams="mu=0.3" />
+
+    <Node name="FingerScene">
+        <Node name="finger">
+            <EulerImplicitSolver rayleighStiffness="0.1" rayleighMass="0.1" printLog="false" />
+            <!-- <SparseLDLSolver name="directSolver" /> -->
+            <CGLinearSolver iterations="25" name="directSolver" tolerance="1e-12" threshold="1e-12" />
+
+            <MeshVTKLoader name="loader"
+                           filename="C:/Users/ThomasX/Desktop/SOFA stuff/object files/Better Meshes/chamfer/new chamfers/0.2 mm chamfer/Parab_FEA_4by41_11wide_with_support_15degAngle_2mmchamfer_2mmmesh.vtk" 
+                           translation='0 0 0'
+                           rotation='0 0 -15'
+                           />
+            <TetrahedronSetTopologyContainer src='@loader' name='container' />
+            <TetrahedronSetTopologyModifier />
+            <TetrahedronSetGeometryAlgorithms template="Vec3d" />
+            <MechanicalObject name='tetras' template='Vec3d' showObject='true' showObjectScale='1' />
+            <UniformMass totalMass="0.00337" />
+            <TetrahedronFEMForceField template='Vec3d' name='FEM' method='large' poissonRatio="0.3" youngModulus="3.4" drawAsEdges='true' />
+
+            <!-- stiff layer -->
+            <BoxROI name='stiffLayer_boxROI' orientedBox='50 -14.2 5 50 -13.2 5 0 0.2 5 15' drawBoxes='true' />
+            <Node name="stiffLayer">
+                <TetrahedronSetTopologyContainer position='@loader.position' tetrahedra="@stiffLayer_boxROI.tetrahedraInROI" name='container' />
+                <TetrahedronFEMForceField template='Vec3d' name='FEM' method='large' poissonRatio="0.3" youngModulus="1996.6" />
+            </Node>
+
+            <!-- constrain base -->
+            <BoxROI name='base_boxROI' orientedBox='3 -5 5 6 9 5 -2 10 5 15' drawBoxes='true' />
+            <RestShapeSpringsForceField points='@base_boxROI.indices' stiffness="1e12" angularStiffness="1e12" />
+
+            <!-- <LinearSolverConstraintCorrection solverName="directSolver" /> -->
+                <!-- note: may lead to graphScattered warnings when combined with CGLinearSolver -->
+            <!-- <UncoupledConstraintCorrection solverName="directSolver"/> (may cause bend issues) -->
+            <PrecomputedConstraintCorrection recompute="true" />
+
+            <!-- cavity -->
+            <Node name="cavity" >
+                <MeshSTLLoader name='cavityLoader'
+                               filename="C:/Users/ThomasX/Desktop/SOFA stuff/object files/Better Meshes/Parab_FEA_4by41_Air_r1mm_gmsh.stl"
+                               translation='47.38 -6.955 9.945'
+                               rotation='90 180 -15' />
+                <MeshTopology src='@cavityLoader' name='cavityMesh' />
+                <MechanicalObject name="cavity" />
+                <SurfacePressureConstraint name="SurfacePressureConstraint" template='Vec3d' value="0.0001" triangles='@cavityMesh.triangles' valueType="pressure" />
+                <BarycentricMapping name='mapping' mapForces='false' mapMasses='false' />
+            </Node>
+
+            <!-- finger collision -->
+            <Node name="collisionFinger">
+                <MeshSTLLoader name='loader'
+                               filename="C:/Users/ThomasX/Desktop/SOFA stuff/object files/Better Meshes/chamfer/new chamfers/0.2 mm chamfer/Parab_FEA_4by41_11wide_with_support_15degAngle_2mmchamfer_2mmmesh_gmsh.stl"
+                               translation='0 0 0'
+                               rotation='0 0 -15' />
+                <MeshTopology src='@loader' name='collisFinger_Mesh' />
+                <MechanicalObject name='collisFinger_MechO' />
+                <TriangleCollisionModel selfCollision='0' />
+                <LineCollisionModel selfCollision='0' />
+                <PointCollisionModel selfCollision='0' />
+                <BarycentricMapping />
+            </Node>
+        </Node>
+    </Node> <!-- end FingerScene -->
+
+
+    
+    <!-- DataExchanges for multithreading -->
+    <!--
+    <DataExchange name="exchangeData1" template="vector<Vec3d>" to="@ObjectScene/OBJECT/DOFS.position" from="@FingerScene/finger/tetras.position"/>
+    <DataExchange name="exchangeData4" template="vector<Vec3d>" to="@ObjectScene/OBJECT/DOFS.force" from="@FingerScene/finger/tetras.force"/>
+    <DataExchange name="exchangeData5" template="vector<Vec3d>" to="@ObjectScene/OBJECT/DOFS.externalForce" from="@FingerScene/finger/tetras.externalForce"/>
+    -->
+
+    <!-- <DataExchange name="exchangeData2" template="vector<Vec3d>" from="@ObjectScene/OBJECT/DOFS.free_position" to="@FingerScene/finger/tetras.free_position"/>
+    <DataExchange name="exchangeData3" template="vector<Vec3d>" from="@ObjectScene/OBJECT/DOFS.velocity" to="@FingerScene/finger/tetras.velocity"/> -->
+
+</Node> <!-- end root -->
