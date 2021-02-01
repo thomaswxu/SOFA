@@ -27,11 +27,11 @@ def createScene(rootNode):
 
         ''' Settings '''
         gravityOn = False
-        objectOn = False
+        objectOn = True
         showSL = False
         showProbeIndices = False
         #monitorFinger = False
-        monitorObject = True
+        monitorObject = False
         fastComp = False   # speeds up simulation by increasing tolerances; CAUTION: may reduce accuracy
         dt = '0.02' # simulation timestep
 
@@ -96,27 +96,10 @@ def createScene(rootNode):
         ###########
 
         ''' choose FEA variant (decides mass, file names) '''
-        ''' options: parab_4x41x11
-                     parab_4x41x20
-                     parab_9x41x20
-                     rect_4x41x11
-                     rect_4x41x20
-                     rect_9x41x20
-            suffixes: _ChX.X      (modified to have bottom extruded+chamfered layer for strain limiting, X.X = SL layer thickness in mm)
-                      _ChX.X_thin (additional _thin means total FEA height is reduced by SL layer thickness, i.e. thinner gap pre SL layer)
-                      _ChX.X_tall (additional _tall means top wall of each segment thickened (note: implies _thin also))
-                          (note: prob use tall for Ch0.1... unsure if also _thin (prob negligible anyway))
-                      _ChX.X_tall_XXdeg (base modified to be angled by XX degrees from vertical)
-                      _crs (uses coarser mesh)
-                      _SC for 'sanity check' stuff (i.e. no bot chamfer)
-
-            main FEA variants:
-                     parab     (parab_4x41x11_Ch0.1_tall_crs)
-                     parab_ang (parab_4x41x11_Ch0.1_tall_15deg_crs)
-                     rect      (parab_4x41x11_Ch0.1_tall_crs)
-                     rect_ang  (parab_4x41x11_Ch0.1_tall_15deg_crs)
+        ''' main options: parab_ang_Ch0.2,
+                          rect_ang_Ch0.2
         '''
-        fea_variant = 'rect_ang_Ch0.2' #'parab_ang_Ch0.2'
+        fea_variant = 'parab_ang_Ch0.2' #'parab_ang_Ch0.2'
         angledVariant = True  # triggers angled boxROI for SL layer, base constraint
         collisFingerOn = True
 
@@ -141,7 +124,7 @@ def createScene(rootNode):
         ''' get mass, file names based on FEA variant chosen '''
         feaTotMass = fea_variant_mass(fea_variant) # kg (*increasing mass doesn't seem to help with pressure explosion)
         feaVertMass = 0.0000001 # kg (alternative to total mass; currently unused)
-        folder_path = 'C:/Users/ThomasX/Desktop/SOFA stuff/object files/Better Meshes/'
+        folder_path = '../object files/Better Meshes/'
         feaSTL_path = folder_path + fea_variant_STL(fea_variant)
         feaVTK_path = folder_path + fea_variant_VTK(fea_variant)
         cavitySTL_path = folder_path + fea_variant_airSTL(fea_variant)
@@ -251,14 +234,12 @@ def createScene(rootNode):
 
                 ''' pick object variant '''
                 ### options: cylinder   (cyl_dXX)
-                ###          hemisphere (hemi_dXX)
                 ###          (d = diameter in mm, value = XX)
-                ### suffixes: _cut (only portion of object used)
                 obj_variant = 'cyl_d100';
                 
                 ''' general parameters '''
                 objMass = 0.1 # kg (Note: may not matter when gravity off)
-                objYoungMod = 50000 # MPa (main options: 0.005, 0.05, 0.5) (*Rigid test: 50 GPa)
+                objYoungMod = 0.005 # MPa (main options: 0.005, 0.05, 0.5) (*Rigid test: 50 GPa)
                 objPoisson = 0.3
 
                 ''' get object file paths '''
@@ -322,4 +303,3 @@ def createScene(rootNode):
                 # data exchange for multithreading
                 kwargs = {'name':'exchangeData1', 'template':'vector<float>', 'from': '@finger/tetras.position', 'to': '@OBJECT/DOFS.position'}
                 rootNode.createObject('DataExchange', **kwargs)
-                
