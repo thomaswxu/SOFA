@@ -1,0 +1,194 @@
+##################################################################################################
+# This scene is for simulating a single FEA, with or without interaction with an additional object
+#
+# Note: This file has been updated to work with SOFA version v20.06
+#       (implementation differs slightly from SoftRobots examples (from v19.06))
+
+import Sofa
+import math
+import os
+
+def createScene(rootNode):
+
+        ''' Settings '''
+        dt = '0.02' # simulation timestep
+        rootNode.createObject('VisualStyle', displayFlags=' showBehavior hideVisual showMapping') # showWireframe showMapping')
+        rootNode.findData('gravity').value='0 0 0'
+        rootNode.findData('dt').value=dt
+
+        ''' Required Plugins '''
+        rootNode.createObject('RequiredPlugin', name='SofaSparseSolver', pluginName='SofaSparseSolver') # for SparseLDLSolver
+        rootNode.createObject('RequiredPlugin', name='SofaConstraint', pluginName='SofaConstraint') # for FreeMotionAnimationLoop, GenericConstraintSolver
+        rootNode.createObject('RequiredPlugin', name='SofaImplicitOdeSolver', pluginName='SofaImplicitOdeSolver') # for EulerImplicitSolver
+        rootNode.createObject('RequiredPlugin', name='SofaLoader', pluginName='SofaLoader') # for MeshVTKLoader
+        rootNode.createObject('RequiredPlugin', name='SofaDeformable', pluginName='SofaDeformable') # for RestShapeSpringsForceField
+        rootNode.createObject('RequiredPlugin', name='SofaEngine', pluginName='SofaEngine') # for BoxROI
+        rootNode.createObject('RequiredPlugin', name='SofaMeshCollision', pluginName='SofaMeshCollision') # for Triangle/Line/Point CollisionModel
+        rootNode.createObject('RequiredPlugin', name='SofaSimpleFem', pluginName='SofaSimpleFem') # for TetrehedronFEMForceField
+
+        ''' Constraint Solver '''
+        constraintTolerance = '1e-6' # previously was 1e-12
+        maxIter = '1000' # previously was 10000
+                
+        rootNode.createObject('FreeMotionAnimationLoop') # will build up the system including constraints
+        rootNode.createObject('GenericConstraintSolver', tolerance=constraintTolerance, maxIterations=maxIter, computeConstraintForces='1')
+        
+        ''' Collision Handling '''
+        mu = 0.3
+        alarmDist = '1.5'     # mm, e.g. 1.5
+        contactDist = '0.75'  # mm, e.g. 0.75
+        rootNode.createObject('DefaultPipeline', verbose='0', draw='0') # alternative: CollisionPipeline
+        rootNode.createObject('BruteForceDetection', name="N2")
+        rootNode.createObject('MinProximityIntersection', name='Proximity', alarmDistance=alarmDist, contactDistance=contactDist)
+        rootNode.createObject('DefaultContactManager', response='FrictionContact', responseParams='mu='+str(mu))
+
+
+        ###########
+        ''' FEA '''
+        ###########
+
+        ''' initialize FEA node '''
+        CG_iter = '25'
+        CG_tol = '1e-12'
+        CG_thresh = '1e-12'
+
+        finger = rootNode.createChild('finger') # note: this name referenced in python controller (case sensitive)
+        finger.createObject('EulerImplicit', name='odeSolver', rayleighStiffness='0.1', rayleighMass='0.1')     # time integration
+        finger.createObject('SparseLDLSolver', name='directSolver')     # matrix solver, to compute node positions/velocities
+
+        ''' general parameters '''
+        feaPoisson = 0.3
+        feaPoisson_stiff = 0.3   # "stiff": used for simulated stiffer layer
+        feaYoungMod_stiff = 2000 # MPa (paper: ~2 GPa)
+        feaYoungMod = 3.4        # MPa (based on DS30 value)
+
+        ''' get mass, file names based on FEA variant chosen '''
+        feaTotMass = 0.00251
+        folder_path = '../files/'
+        feaSTL_path = folder_path + 'rect_pneunet.STL'
+        feaVTK_path = folder_path + 'rect_pneunet.vtk'
+        cavitySTL_path = folder_path + 'rect_pneunet_cavity.stl'
+
+        ''' rotate base by certain angle (optional) '''
+        fingerTrans = '0 0 0'
+        fingerRot = '0 0 -15'
+
+        ''' create volumetric mesh '''
+        finger.createObject('MeshVTKLoader', name='loader', filename=feaVTK_path, translation=fingerTrans, rotation=fingerRot)
+        finger.createObject('TetrahedronSetTopologyContainer', src='@loader', name='container')
+        finger.createObject('TetrahedronSetTopologyModifier')
+        finger.createObject('TetrahedronSetGeometryAlgorithms', template='Vec3d')
+        finger.createObject('MechanicalObject', name='tetras', template='Vec3d', showObject='true', showObjectScale='1')    # stores mesh DOFs (position of nodes)
+        
+        ''' simulate material and internal forces '''
+        finger.createObject('UniformMass', totalMass=str(feaTotMass)) # totalMass=str(feaTotMass) vs. vertexMass=str(feaVertMass)
+        finger.createObject('TetrahedronFEMForceField', template='Vec3d', name='FEM', method='large', poissonRatio=str(feaPoisson),  youngModulus=str(feaYoungMod), drawAsEdges='true')
+        
+        
+        ''' add (simulated) stiffer layer to FEA using boxROI '''
+        #   (note: AKA "model sub topology")
+        #   box: 'x_min y_min z_min x_max y_max z_max'
+        stiffLayer_boxROI_coords = '50 -14.2 5 50 -13.2 5 0 0.2 5 15'
+        finger.createObject('BoxROI', name='stiffLayer_boxROI', box=stiffLayer_boxROI_coords, drawBoxes='true')    
+        stiffLayer = finger.createChild('stiffLayer')
+        
+        stiffLayer.createObject('TetrahedronSetTopologyContainer', position='@loader.position', tetrahedra="@stiffLayer_boxROI.tetrahedraInROI", name='container')
+        stiffLayer.createObject('TetrahedronSetTopologyModifier')
+        stiffLayer.createObject('TetrahedronSetGeometryAlgorithms', template='Vec3d')
+        stiffLayer.createObject('TetrahedronFEMForceField', template='Vec3d', name='FEM', method='large', poissonRatio=str(feaPoisson_stiff),  youngModulus=str(feaYoungMod_stiff-feaYoungMod))
+
+                
+        ''' constrain FEA base '''
+        baseConstraint_coords = '3 -5 5 6 9 5 -2 10 5 15'
+        baseConstraint_stiffness = '1e12'
+        baseConstraint_angStiffness = '1e12'
+        finger.createObject('BoxROI', name='base_boxROI', box=baseConstraint_coords, drawBoxes='true')   
+        finger.createObject('RestShapeSpringsForceField', points='@base_boxROI.indices', stiffness=baseConstraint_stiffness, angularStiffness=baseConstraint_angStiffness)
+
+        finger.createObject('LinearSolverConstraintCorrection', solverName='directSolver') # accounts for cavity constraint; linked to SparseLDLSolver above via solverName
+
+
+        ''' get cavity placement (trans, rot) based on FEA variant chosen '''
+        cavity_trans = '6.51 -1.64 0.65' 
+        cavity_rot = '0 0 -15'
+
+        ''' create cavity node '''
+        cavity = finger.createChild('cavity')
+        cavity.createObject('MeshSTLLoader', name='cavityLoader', filename=cavitySTL_path, translation=cavity_trans, rotation=cavity_rot) # load SURFACE mesh
+        cavity.createObject('Mesh', src='@cavityLoader', name='cavityMesh')
+        cavity.createObject('MechanicalObject', name='cavity')  # stores DOFs
+
+        ''' add pressure using cavity '''
+        cavity.createObject('BarycentricMapping', name='mapping', mapForces='false', mapMasses='false') # maps cavity mesh deformation to finger mesh
+
+        ''' collision '''
+        # note: uses SURFACE mesh (i.e. STL)
+        # (surface mesh nodes don't need to match volumetric mesh nodes; linked via mapping)
+        collisFinger_trans = fingerTrans
+        collisFinger_rot = fingerRot
+
+        collisionFinger = finger.createChild('collisionFinger')
+        collisionFinger.createObject('MeshSTLLoader', name='loader', filename=feaSTL_path, translation=collisFinger_trans, rotation=collisFinger_rot)
+        collisionFinger.createObject('Mesh', src='@loader', name='collisFinger_Mesh')
+        collisionFinger.createObject('MechanicalObject', name='collisFinger_MechO')
+
+        collisionFinger.createObject('Triangle', selfCollision='0')     # will prob crash if selfCollision = '1'
+        collisionFinger.createObject('Line', selfCollision='0')
+        collisionFinger.createObject('Point', selfCollision='0')
+        collisionFinger.createObject('BarycentricMapping') #, mapForces='false', mapMasses='false')
+
+
+        ##############
+        ''' Object '''
+        ##############
+
+        ''' pick object variant '''
+        ### options: cylinder   (cyl_dXX)
+        ###          (d = diameter in mm, value = XX)
+        obj_variant = 'cyl_d100';
+        
+        ''' general parameters '''
+        objMass = 0.1 # kg (Note: may not matter when gravity off)
+        objYoungMod = 0.005 # MPa (main options: 0.005, 0.05, 0.5) (*Rigid test: 50 GPa)
+        objPoisson = 0.3
+
+        ''' get object file paths '''
+        obj_folder_path = folder_path
+        objVTK_path = obj_folder_path + 'cyl_d100_r10mm.vtk'
+        objSTL_path = obj_folder_path + 'cyl_d100_r10mm_gmsh.stl' 
+
+        ''' define object position based on variant '''
+        objTrans = '-63 1 -7.5' # mm
+        objRot = '90 0 0' # deg
+
+        ''' initialize node '''
+        obj = rootNode.createChild('OBJECT')
+        obj.createObject('EulerImplicit', name='odeSolver', rayleighStiffness='0.1', rayleighMass='0.1')
+        obj.createObject('SparseLDLSolver', name='directSolver')
+
+        ''' main object node '''
+        obj.createObject('MeshVTKLoader', name='loader', filename=objVTK_path, translation=objTrans, rotation=objRot)
+        obj.createObject('TetrahedronSetTopologyContainer', src='@loader', name='container')
+        obj.createObject('TetrahedronSetTopologyModifier')
+        obj.createObject('TetrahedronSetGeometryAlgorithms')
+
+        obj.createObject('MechanicalObject', name='DOFS', template='Vec3d')
+        obj.createObject('UniformMass', totalMass=str(objMass))
+
+        obj.createObject('TetrahedronFEMForceField', name="FEM", method='large', poissonRatio=str(objPoisson), youngModulus=str(objYoungMod), computeGlobalMatrix='0', updateStiffnessMatrix='0')
+        obj.createObject('LinearSolverConstraintCorrection', solverName='directSolver')
+                
+        # collision
+        objCollis = obj.createChild('objCollis')
+        objCollis.createObject('MeshSTLLoader', name='loader', filename=objSTL_path, translation=objTrans, rotation=objRot)
+        objCollis.createObject('Mesh', src='@loader')
+        objCollis.createObject('MechanicalObject', name='collisMech')
+        objCollis.createObject('TriangleCollisionModel', selfCollision='0')
+        objCollis.createObject('BarycentricMapping')
+
+
+        ''' constrain object base (based on variant) '''
+        obj_constraint_boxROI = '-70 -100 -15 40 -80 25'
+        obj.createObject('BoxROI', name='base_boxROI', box=obj_constraint_boxROI, drawBoxes='true')   
+        obj.createObject('RestShapeSpringsForceField', points='@base_boxROI.indices', stiffness='1e12', angularStiffness='1e12')
+
