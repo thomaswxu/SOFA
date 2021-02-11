@@ -71,7 +71,7 @@ def createScene(rootNode):
 
         ''' rotate base by certain angle (optional) '''
         fingerTrans = '0 0 0'
-        fingerRot = '0 0 -15'
+        fingerRot = '0 0 0'
 
         ''' create volumetric mesh '''
         finger.createObject('MeshVTKLoader', name='loader', filename=feaVTK_path, translation=fingerTrans, rotation=fingerRot)
@@ -88,7 +88,7 @@ def createScene(rootNode):
         ''' add (simulated) stiffer layer to FEA using boxROI '''
         #   (note: AKA "model sub topology")
         #   box: 'x_min y_min z_min x_max y_max z_max'
-        stiffLayer_boxROI_coords = '50 -14.2 5 50 -13.2 5 0 0.2 5 15'
+        stiffLayer_boxROI_coords = '-1 -1 -1 50 1 15'
         finger.createObject('BoxROI', name='stiffLayer_boxROI', box=stiffLayer_boxROI_coords, drawBoxes='true')    
         stiffLayer = finger.createChild('stiffLayer')
         
@@ -99,7 +99,7 @@ def createScene(rootNode):
 
                 
         ''' constrain FEA base '''
-        baseConstraint_coords = '3 -5 5 6 9 5 -2 10 5 15'
+        baseConstraint_coords = '-1 -1 -1 5 10 15'
         baseConstraint_stiffness = '1e12'
         baseConstraint_angStiffness = '1e12'
         finger.createObject('BoxROI', name='base_boxROI', box=baseConstraint_coords, drawBoxes='true')   
@@ -109,8 +109,8 @@ def createScene(rootNode):
 
 
         ''' get cavity placement (trans, rot) based on FEA variant chosen '''
-        cavity_trans = '6.51 -1.64 0.65' 
-        cavity_rot = '0 0 -15'
+        cavity_trans = '0 1 0' #'6.51 -1.64 0.65' 
+        cavity_rot = '0 0 0'
 
         ''' create cavity node '''
         cavity = finger.createChild('cavity')
